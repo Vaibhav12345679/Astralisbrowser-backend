@@ -13,8 +13,11 @@ app.use(bodyParser.json());
 // PostgreSQL pool setup
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
+  ssl: {
+    rejectUnauthorized: false
+  }
 });
+
 
 // Create tables if not exists - wrapped in an async function and awaited
 async function ensureTables() {
