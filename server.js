@@ -10,14 +10,14 @@ const port = process.env.PORT || 3000;
 app.use(cors());
 app.use(bodyParser.json());
 
-// PostgreSQL pool
+// PostgreSQL pool setup
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false }
 });
 
-// Create tables if not exists
-(async () => {
+// Create tables if not exists - wrapped in an async function and awaited
+async function ensureTables() {
   try {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS users (
@@ -40,16 +40,24 @@ const pool = new Pool({
     console.log("Tables ensured.");
   } catch (err) {
     console.error("Error creating tables:", err);
+    process.exit(1); // Exit if tables can't be created
   }
-})();
+}
 
-// Validate email
+// Immediately call and await table creation before server start
+ensureTables().then(() => {
+  app.listen(port, () => {
+    console.log(`Server running at http://localhost:${port}`);
+  });
+});
+
+// Email validation helper
 function isValidEmail(email) {
   const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   return re.test(email);
 }
 
-// Register
+// Register endpoint
 app.post("/api/register", async (req, res) => {
   const { name, username, email, password, confirmPassword } = req.body;
   if (!name || !username || !email || !password || !confirmPassword)
@@ -67,16 +75,18 @@ app.post("/api/register", async (req, res) => {
     );
     res.json({ success: true });
   } catch (err) {
-    if (err.message.includes("users_username_key"))
-      return res.status(400).json({ success: false, message: "Username already taken" });
-    if (err.message.includes("users_email_key"))
-      return res.status(400).json({ success: false, message: "Email already registered" });
+    if (err.code === "23505") { // Unique violation
+      if (err.detail.includes("username"))
+        return res.status(400).json({ success: false, message: "Username already taken" });
+      if (err.detail.includes("email"))
+        return res.status(400).json({ success: false, message: "Email already registered" });
+    }
     console.error(err);
     res.status(500).json({ success: false, message: "Database error" });
   }
 });
 
-// Login
+// Login endpoint
 app.post("/api/login", async (req, res) => {
   const { login, password } = req.body;
   if (!login || !password)
@@ -101,7 +111,7 @@ app.post("/api/login", async (req, res) => {
   }
 });
 
-// Bookmarks sync
+// Bookmarks sync endpoint
 app.post("/api/sync/bookmarks", async (req, res) => {
   const { userId, bookmarks } = req.body;
   if (!userId || !Array.isArray(bookmarks))
@@ -110,13 +120,26 @@ app.post("/api/sync/bookmarks", async (req, res) => {
   try {
     await pool.query("BEGIN");
     await pool.query("DELETE FROM bookmarks WHERE user_id = $1", [userId]);
-    for (const bm of bookmarks) {
-      await pool.query("INSERT INTO bookmarks (user_id, title, url) VALUES ($1, $2, $3)", [
-        userId,
-        bm.title,
-        bm.url
-      ]);
+
+    // Batch insert bookmarks to reduce query overhead
+    if (bookmarks.length > 0) {
+      const values = [];
+      const placeholders = [];
+
+      bookmarks.forEach(({ title, url }, i) => {
+        values.push(userId, title, url);
+        placeholders.push(`($${i * 3 + 1}, $${i * 3 + 2}, $${i * 3 + 3})`);
+      });
+
+      const insertQuery = `
+        INSERT INTO bookmarks (user_id, title, url)
+        VALUES ${placeholders.join(", ")}
+        ON CONFLICT (user_id, url) DO NOTHING
+      `;
+
+      await pool.query(insertQuery, values);
     }
+
     await pool.query("COMMIT");
     res.json({ success: true });
   } catch (err) {
@@ -124,10 +147,6 @@ app.post("/api/sync/bookmarks", async (req, res) => {
     console.error(err);
     res.status(500).json({ success: false, message: "Database error" });
   }
-});
-
-app.listen(port, () => {
-  console.log(`Server running at http://localhost:${port}`);
 });
 
 
