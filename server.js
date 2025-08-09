@@ -12,7 +12,7 @@ app.use(bodyParser.json());
 
 // PostgreSQL pool
 const pool = new Pool({
-  connectionString: "postgresql://postgres:YOUR-PASSWORD@db.fxmgvysxzvspjjonfliw.supabase.co:5432/postgres",
+  connectionString: "postgresql://postgres:Vaibhav@0106@db.fxmgvysxzvspjjonfliw.supabase.co:5432/postgres",
   ssl: { rejectUnauthorized: false }
 });
 
