@@ -19,6 +19,7 @@ const pool = new Pool({
 });
 
 
+
 // Create tables if not exists - wrapped in an async function and awaited
 async function ensureTables() {
   try {
